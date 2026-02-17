@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AADS Live Stream Stats Display</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            background-color: transparent;
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+        }
+        body.scroll-locked {
+            overflow: hidden !important;
+        }
+        body.scroll-locked * {
+            overflow: hidden !important;
+            pointer-events: auto;
+        }
+        body.scroll-locked .iframe-wrapper {
+            overflow: hidden !important;
+        }
+        .bg-gold-gradient {
+            background: linear-gradient(135deg, rgba(234, 179, 8, 0.95) 0%, rgba(161, 98, 7, 0.95) 100%);
+        }
+        .stats-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        /* Control Header - Crop this out in OBS */
+        .control-header {
+            background: #1a1a1a;
+            border-bottom: 3px solid #eab308;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+            transition: all 0.3s ease;
+            height: 140px;
+            overflow: hidden;
+        }
+        .control-header.collapsed {
+            height: 0;
+            border-bottom-width: 0;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+        }
+        .control-header.locked {
+            background: #0f0f0f;
+            border-bottom-color: #dc2626;
+        }
+        .control-header.locked .control-btn:not(.lock-btn):not(.tab-btn),
+        .control-header.locked .control-input,
+        .control-header.locked .url-input,
+        .control-header.locked .color-preset {
+            opacity: 0.3;
+            pointer-events: none;
+        }
+        .tabs {
+            display: flex;
+            gap: 4px;
+            border-bottom: 2px solid #333;
+            padding-bottom: 4px;
+            margin-bottom: 8px;
+        }
+        .tab-btn {
+            background: #2a2a2a;
+            color: #888;
+            padding: 6px 16px;
+            border: none;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover {
+            background: #333;
+            color: #aaa;
+        }
+        .tab-btn.active {
+            background: #eab308;
+            color: black;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .compact-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .toggle-header-btn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 2000;
+            background: rgba(0, 0, 0, 0.9);
+            color: #eab308;
+            border: 2px solid #eab308;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        }
+        .toggle-header-btn:hover {
+            background: rgba(234, 179, 8, 0.2);
+            transform: translateY(-1px);
+        }
+        .lock-btn {
+            background: linear-gradient(135deg, #10b981 0%, #047857 100%) !important;
+        }
+        .lock-btn.locked {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important;
+        }
+        /* Branded Header - Keep this visible */
+        .branded-header {
+            background: linear-gradient(135deg, #eab308 0%, #a16207 100%);
+            border-bottom: 4px solid #78350f;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.5);
+            margin: 0 auto;
+            transition: all 0.3s ease;
+        }
+        /* Branded Footer - Keep this visible */
+        .branded-footer {
+            background: linear-gradient(135deg, #eab308 0%, #a16207 100%);
+            border-top: 4px solid #78350f;
+            box-shadow: 0 -4px 6px rgba(0, 0, 0, 0.5);
+            margin: 0 auto;
+            transition: all 0.3s ease;
+        }
+        .color-preset {
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .color-preset:hover {
+            transform: scale(1.1);
+            border-color: white;
+        }
+        .color-preset.active {
+            border-color: #fcd34d;
+            box-shadow: 0 0 8px rgba(252, 211, 77, 0.6);
+        }
+        .content-wrapper {
+            background: transparent;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+        }
+        .iframe-wrapper {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: transparent;
+            width: 100%;
+        }
+        .stats-iframe {
+            border: none;
+            background: white;
+            position: absolute;
+        }
+        /* Group Header Overlays */
+        .group-overlay {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 1200px;
+            z-index: 10;
+            padding: 14px 20px;
+            font-weight: 700;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            text-align: left;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            background: linear-gradient(135deg, #eab308 0%, #a16207 100%);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+        }
+        .url-input {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #eab308;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .url-input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.15);
+            border-color: #fcd34d;
+        }
+        .url-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        .control-btn {
+            background: linear-gradient(135deg, #eab308 0%, #a16207 100%);
+            color: black;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            font-size: 13px;
+        }
+        .control-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(234, 179, 8, 0.4);
+        }
+        .control-btn:active {
+            transform: translateY(0);
+        }
+        .control-btn-red {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+        }
+        .control-btn-small {
+            padding: 4px 12px;
+            font-size: 12px;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .control-label {
+            color: #eab308;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 4px;
+        }
+        .control-input {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid #eab308;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            width: 60px;
+            font-size: 12px;
+        }
+        .control-input:focus {
+            outline: none;
+            border-color: #fcd34d;
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Toggle Header Button (Always Visible) -->
+    <button class="toggle-header-btn" onclick="toggleControlHeader()" id="toggleHeaderBtn">
+        ▼ Hide Controls
+    </button>
+
+    <div class="stats-container">
+        <!-- Control Header - CROP THIS OUT IN OBS -->
+        <div id="controlHeader" class="control-header px-4 py-2">
+            <div class="flex flex-col gap-2">
+                <!-- Top Bar: Lock + Tabs -->
+                <div class="flex justify-between items-center">
+                    <div class="tabs">
+                        <button class="tab-btn active" onclick="switchTab('url')">URL</button>
+                        <button class="tab-btn" onclick="switchTab('position')">Position</button>
+                        <button class="tab-btn" onclick="switchTab('style')">Style</button>
+                        <button class="tab-btn" onclick="switchTab('layout')">Layout</button>
+                        <button class="tab-btn" onclick="switchTab('groups')">Groups</button>
+                    </div>
+                    <button onclick="toggleLock()" class="control-btn lock-btn" id="lockBtn" style="padding: 6px 12px; font-size: 12px;">
+                        🔓 Unlocked
+                    </button>
+                </div>
+
+                <!-- Tab: URL -->
+                <div id="tab-url" class="tab-content active">
+                    <div class="compact-row">
+                        <input type="text" id="urlInput" class="url-input flex-1" placeholder="Enter Dart Connect URL" onkeypress="if(event.key === 'Enter') loadStats()" style="font-size: 13px; padding: 6px 10px;" />
+                        <button onclick="loadStats()" class="control-btn control-btn-small">📥 Load</button>
+                        <button onclick="clearStats()" class="control-btn control-btn-small control-btn-red">🗑️ Clear</button>
+                    </div>
+                </div>
+
+                <!-- Tab: Position -->
+                <div id="tab-position" class="tab-content">
+                    <div class="compact-row">
+                        <span class="control-label">Move:</span>
+                        <button onclick="adjustPosition('up')" class="control-btn control-btn-small">↑</button>
+                        <button onclick="adjustPosition('down')" class="control-btn control-btn-small">↓</button>
+                        <button onclick="adjustPosition('left')" class="control-btn control-btn-small">←</button>
+                        <button onclick="adjustPosition('right')" class="control-btn control-btn-small">→</button>
+                        <span style="color: #666; margin: 0 8px;">|</span>
+                        <span class="control-label">Zoom:</span>
+                        <button onclick="adjustZoom(-0.1)" class="control-btn control-btn-small">-</button>
+                        <input type="number" id="zoomInput" class="control-input" value="100" min="10" max="500" step="10" onchange="setZoom()" style="width: 50px;" />
+                        <span class="text-white text-xs">%</span>
+                        <button onclick="adjustZoom(0.1)" class="control-btn control-btn-small">+</button>
+                        <span style="color: #666; margin: 0 8px;">|</span>
+                        <button onclick="resetFrame()" class="control-btn control-btn-small">🔄 Reset</button>
+                    </div>
+                    <div class="compact-row">
+                        <span class="control-label">Width:</span>
+                        <input type="number" id="widthInput" class="control-input" value="100" min="50" max="300" step="10" onchange="setSize()" style="width: 50px;" />
+                        <span class="text-white text-xs">%</span>
+                        <span class="control-label" style="margin-left: 12px;">Height:</span>
+                        <input type="number" id="heightInput" class="control-input" value="100" min="50" max="300" step="10" onchange="setSize()" style="width: 50px;" />
+                        <span class="text-white text-xs">%</span>
+                    </div>
+                </div>
+
+                <!-- Tab: Style -->
+                <div id="tab-style" class="tab-content">
+                    <div class="compact-row">
+                        <span class="control-label">Theme:</span>
+                        <div class="flex gap-1">
+                            <div class="color-preset active" data-theme="gold" onclick="setColorTheme('gold')" style="background: linear-gradient(135deg, #eab308 0%, #a16207 100%); width: 28px; height: 28px;"></div>
+                            <div class="color-preset" data-theme="orange" onclick="setColorTheme('orange')" style="background: linear-gradient(135deg, #f97316 0%, #c2410c 100%); width: 28px; height: 28px;"></div>
+                            <div class="color-preset" data-theme="red" onclick="setColorTheme('red')" style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); width: 28px; height: 28px;"></div>
+                            <div class="color-preset" data-theme="navy" onclick="setColorTheme('navy')" style="background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%); width: 28px; height: 28px;"></div>
+                            <div class="color-preset" data-theme="teal" onclick="setColorTheme('teal')" style="background: linear-gradient(135deg, #14b8a6 0%, #0f766e 100%); width: 28px; height: 28px;"></div>
+                            <div class="color-preset" data-theme="purple" onclick="setColorTheme('purple')" style="background: linear-gradient(135deg, #9333ea 0%, #6b21a8 100%); width: 28px; height: 28px;"></div>
+                            <div class="color-preset" data-theme="slate" onclick="setColorTheme('slate')" style="background: linear-gradient(135deg, #64748b 0%, #334155 100%); width: 28px; height: 28px;"></div>
+                        </div>
+                    </div>
+                    <div class="compact-row">
+                        <span class="control-label">Text:</span>
+                        <button onclick="setBarTextColor('white')" class="control-btn control-btn-small">White</button>
+                        <button onclick="setBarTextColor('black')" class="control-btn control-btn-small">Black</button>
+                        <button onclick="setBarTextColor('#fcd34d')" class="control-btn control-btn-small" style="background: #fcd34d; color: black;">Yellow</button>
+                        <input type="color" id="customBarColor" onchange="setBarTextColor(this.value)" class="control-input" style="width: 40px; height: 28px; cursor: pointer; padding: 2px;" title="Custom color" />
+                    </div>
+                </div>
+
+                <!-- Tab: Layout -->
+                <div id="tab-layout" class="tab-content">
+                    <div class="compact-row">
+                        <span class="control-label">Header:</span>
+                        <button onclick="adjustHeaderWidth(-50)" class="control-btn control-btn-small">-</button>
+                        <input type="number" id="headerWidthInput" class="control-input" value="1200" min="600" max="2000" step="50" onchange="setHeaderWidth()" style="width: 60px;" />
+                        <span class="text-white text-xs">px</span>
+                        <button onclick="adjustHeaderWidth(50)" class="control-btn control-btn-small">+</button>
+                        <button onclick="setHeaderWidthFull()" class="control-btn control-btn-small">Full</button>
+                        <span style="color: #666; margin: 0 8px;">|</span>
+                        <span class="control-label">Footer:</span>
+                        <button onclick="adjustFooterPosition('up')" class="control-btn control-btn-small">↑</button>
+                        <button onclick="adjustFooterPosition('down')" class="control-btn control-btn-small">↓</button>
+                        <button onclick="resetFooterPosition()" class="control-btn control-btn-small">Reset</button>
+                    </div>
+                    <div class="compact-row">
+                        <span class="control-label">Footer Text:</span>
+                        <input type="text" id="footerTextInput" class="url-input flex-1" placeholder="Footer text" oninput="updateFooterText()" value="AADS League • Season 2026" style="font-size: 12px; padding: 6px 10px;" />
+                    </div>
+                </div>
+
+                <!-- Tab: Groups -->
+                <div id="tab-groups" class="tab-content">
+                    <div class="compact-row">
+                        <span class="control-label">Group A:</span>
+                        <button onclick="adjustGroupPosition('a', 'up')" class="control-btn control-btn-small">↑</button>
+                        <button onclick="adjustGroupPosition('a', 'down')" class="control-btn control-btn-small">↓</button>
+                        <button onclick="toggleGroupBar('a')" class="control-btn control-btn-small" id="toggleGroupA">Show</button>
+                        <span style="color: #666; margin: 0 8px;">|</span>
+                        <span class="control-label">Group B:</span>
+                        <button onclick="adjustGroupPosition('b', 'up')" class="control-btn control-btn-small">↑</button>
+                        <button onclick="adjustGroupPosition('b', 'down')" class="control-btn control-btn-small">↓</button>
+                        <button onclick="toggleGroupBar('b')" class="control-btn control-btn-small" id="toggleGroupB">Show</button>
+                        <span style="color: #666; margin: 0 8px;">|</span>
+                        <button onclick="resetGroupPositions()" class="control-btn control-btn-small">🔄 Reset</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content Wrapper - Centers everything -->
+        <div class="content-wrapper">
+            <!-- Branded Header - KEEP THIS VISIBLE IN OBS -->
+            <div class="branded-header px-4 py-2" style="width: 100%;">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <h1 class="text-xl font-bold text-black tracking-tight">AADS</h1>
+                        <div class="h-5 w-px bg-black opacity-30"></div>
+                        <h2 class="text-sm font-semibold text-black" id="headerTitle">Player Standings</h2>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xs font-medium text-black opacity-80">LIVE</div>
+                        <div class="text-xs text-black opacity-70" id="currentTime"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Display (iframe with wrapper for positioning) -->
+            <div class="iframe-wrapper">
+                <!-- Group A Overlay Bar -->
+                <div id="groupABar" class="group-overlay" style="top: 100px; display: none;">
+                    GROUP A
+                </div>
+                
+                <!-- Group B Overlay Bar -->
+                <div id="groupBBar" class="group-overlay" style="top: 400px; display: none;">
+                    GROUP B
+                </div>
+                
+                <iframe id="statsFrame" class="stats-iframe" src="" title="Stats Display"></iframe>
+            </div>
+
+            <!-- Branded Footer - KEEP THIS VISIBLE IN OBS -->
+            <div class="branded-footer px-4 py-2" style="width: 100%;">
+                <div class="text-center">
+                    <p class="text-sm font-semibold text-black" id="footerText">AADS League • Season 2026</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Frame adjustment state
+        let frameState = {
+            x: 0,
+            y: 0,
+            zoom: 1.0,
+            width: 100,
+            height: 100
+        };
+
+        // Header width state
+        let headerWidth = 1200; // pixels
+        
+        // Footer position state
+        let footerPosition = 0; // pixels from default position
+        
+        // Color themes
+        const colorThemes = {
+            gold: { gradient: 'linear-gradient(135deg, #eab308 0%, #a16207 100%)', border: '#78350f', text: 'black' },
+            orange: { gradient: 'linear-gradient(135deg, #f97316 0%, #c2410c 100%)', border: '#7c2d12', text: 'white' },
+            red: { gradient: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)', border: '#7f1d1d', text: 'white' },
+            navy: { gradient: 'linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)', border: '#1e3a8a', text: 'white' },
+            teal: { gradient: 'linear-gradient(135deg, #14b8a6 0%, #0f766e 100%)', border: '#134e4a', text: 'white' },
+            purple: { gradient: 'linear-gradient(135deg, #9333ea 0%, #6b21a8 100%)', border: '#581c87', text: 'white' },
+            slate: { gradient: 'linear-gradient(135deg, #64748b 0%, #334155 100%)', border: '#1e293b', text: 'white' }
+        };
+        let currentTheme = 'gold';
+        
+        // Group overlay positions
+        let groupPositions = {
+            a: { top: 100, visible: false },
+            b: { top: 400, visible: false }
+        };
+        
+        // Settings lock state
+        let settingsLocked = false;
+        
+        // Bar text color
+        let barTextColor = 'white';
+        
+        // Control header collapsed state
+        let controlHeaderCollapsed = false;
+
+        // Update time
+        function updateTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit'
+            });
+            document.getElementById('currentTime').textContent = timeString;
+        }
+        updateTime();
+        setInterval(updateTime, 1000);
+
+        // Apply frame transformation
+        function applyFrameTransform() {
+            const frame = document.getElementById('statsFrame');
+            const wrapper = frame.parentElement;
+            
+            // Get wrapper dimensions
+            const wrapperWidth = wrapper.clientWidth;
+            const wrapperHeight = wrapper.clientHeight;
+            
+            // Calculate iframe dimensions
+            const iframeWidth = (wrapperWidth * frameState.width) / 100;
+            const iframeHeight = (wrapperHeight * frameState.height) / 100;
+            
+            frame.style.width = `${iframeWidth}px`;
+            frame.style.height = `${iframeHeight}px`;
+            frame.style.left = `${frameState.x}px`;
+            frame.style.top = `${frameState.y}px`;
+            frame.style.transform = `scale(${frameState.zoom})`;
+            frame.style.transformOrigin = 'top left';
+            
+            // Save state
+            localStorage.setItem('aads-frame-state', JSON.stringify(frameState));
+        }
+
+        // Adjust position
+        function adjustPosition(direction) {
+            if (settingsLocked) return;
+            const step = 2;
+            switch(direction) {
+                case 'up': frameState.y -= step; break;
+                case 'down': frameState.y += step; break;
+                case 'left': frameState.x -= step; break;
+                case 'right': frameState.x += step; break;
+            }
+            applyFrameTransform();
+        }
+
+        // Adjust zoom
+        function adjustZoom(delta) {
+            if (settingsLocked) return;
+            frameState.zoom = Math.max(0.1, Math.min(5, frameState.zoom + delta));
+            document.getElementById('zoomInput').value = Math.round(frameState.zoom * 100);
+            applyFrameTransform();
+        }
+
+        // Set zoom from input
+        function setZoom() {
+            if (settingsLocked) return;
+            const value = parseInt(document.getElementById('zoomInput').value) || 100;
+            frameState.zoom = Math.max(0.1, Math.min(5, value / 100));
+            applyFrameTransform();
+        }
+
+        // Set size from inputs
+        function setSize() {
+            if (settingsLocked) return;
+            frameState.width = parseInt(document.getElementById('widthInput').value) || 100;
+            frameState.height = parseInt(document.getElementById('heightInput').value) || 100;
+            applyFrameTransform();
+        }
+
+        // Reset frame
+        function resetFrame() {
+            if (settingsLocked) return;
+            frameState = { x: 0, y: 0, zoom: 1.0, width: 100, height: 100 };
+            document.getElementById('zoomInput').value = 100;
+            document.getElementById('widthInput').value = 100;
+            document.getElementById('heightInput').value = 100;
+            applyFrameTransform();
+        }
+
+        // Load stats from URL
+        function loadStats() {
+            if (settingsLocked) {
+                alert('Settings are locked! Unlock them first to load a new URL.');
+                return;
+            }
+            
+            const urlInput = document.getElementById('urlInput');
+            const url = urlInput.value.trim();
+            
+            if (!url) {
+                alert('Please enter a URL');
+                return;
+            }
+
+            // Basic URL validation
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                alert('Please enter a valid URL starting with http:// or https://');
+                return;
+            }
+
+            const statsFrame = document.getElementById('statsFrame');
+            statsFrame.src = url;
+            
+            // Save URL to localStorage for persistence
+            localStorage.setItem('aads-stats-url', url);
+        }
+
+        // Clear stats
+        function clearStats() {
+            if (settingsLocked) {
+                alert('Settings are locked! Unlock them first to clear.');
+                return;
+            }
+            
+            document.getElementById('statsFrame').src = '';
+            document.getElementById('urlInput').value = '';
+            localStorage.removeItem('aads-stats-url');
+        }
+
+        // Toggle control header visibility
+        function toggleControlHeader() {
+            controlHeaderCollapsed = !controlHeaderCollapsed;
+            const header = document.getElementById('controlHeader');
+            const btn = document.getElementById('toggleHeaderBtn');
+            
+            if (controlHeaderCollapsed) {
+                header.classList.add('collapsed');
+                btn.innerHTML = '▼ Show Controls';
+            } else {
+                header.classList.remove('collapsed');
+                btn.innerHTML = '▲ Hide Controls';
+            }
+            
+            localStorage.setItem('aads-header-collapsed', controlHeaderCollapsed);
+        }
+
+        // Switch tabs
+        function switchTab(tabName) {
+            if (settingsLocked) return;
+            
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Toggle settings lock
+        function toggleLock() {
+            settingsLocked = !settingsLocked;
+            const controlHeader = document.getElementById('controlHeader');
+            const lockBtn = document.getElementById('lockBtn');
+            const body = document.body;
+            const iframeWrapper = document.querySelector('.iframe-wrapper');
+            
+            if (settingsLocked) {
+                controlHeader.classList.add('locked');
+                lockBtn.classList.add('locked');
+                lockBtn.innerHTML = '🔒 Locked';
+                
+                // Disable scrolling
+                body.classList.add('scroll-locked');
+                if (iframeWrapper) {
+                    iframeWrapper.style.overflow = 'hidden';
+                }
+            } else {
+                controlHeader.classList.remove('locked');
+                lockBtn.classList.remove('locked');
+                lockBtn.innerHTML = '🔓 Unlocked';
+                
+                // Enable scrolling
+                body.classList.remove('scroll-locked');
+                if (iframeWrapper) {
+                    iframeWrapper.style.overflow = 'hidden'; // Keep hidden for iframe wrapper
+                }
+            }
+            
+            if (settingsLocked) {
+                controlHeader.classList.add('locked');
+                lockBtn.classList.add('locked');
+                lockBtn.innerHTML = '🔒 Locked';
+                lockStatus.style.color = '#dc2626';
+            } else {
+                controlHeader.classList.remove('locked');
+                lockBtn.classList.remove('locked');
+                lockBtn.innerHTML = '🔓 Unlocked';
+                lockStatus.style.color = '#a3a3a3';
+            }
+            
+            localStorage.setItem('aads-settings-locked', settingsLocked);
+        }
+
+        // Update footer text
+        function updateFooterText() {
+            if (settingsLocked) return;
+            const text = document.getElementById('footerTextInput').value;
+            document.getElementById('footerText').textContent = text || 'AADS League';
+            localStorage.setItem('aads-footer-text', text);
+        }
+
+        // Adjust header width
+        function adjustHeaderWidth(delta) {
+            if (settingsLocked) return;
+            headerWidth = Math.max(600, Math.min(2000, headerWidth + delta));
+            document.getElementById('headerWidthInput').value = headerWidth;
+            applyHeaderWidth();
+        }
+
+        // Set header width from input
+        function setHeaderWidth() {
+            if (settingsLocked) return;
+            const value = parseInt(document.getElementById('headerWidthInput').value) || 1200;
+            headerWidth = Math.max(600, Math.min(2000, value));
+            document.getElementById('headerWidthInput').value = headerWidth;
+            applyHeaderWidth();
+        }
+
+        // Set header to full width
+        function setHeaderWidthFull() {
+            if (settingsLocked) return;
+            headerWidth = 0; // 0 means full width
+            document.getElementById('headerWidthInput').value = 'Full';
+            applyHeaderWidth();
+        }
+
+        // Apply header width to elements
+        function applyHeaderWidth() {
+            const header = document.querySelector('.branded-header');
+            const footer = document.querySelector('.branded-footer');
+            
+            if (headerWidth === 0) {
+                header.style.maxWidth = '100%';
+                footer.style.maxWidth = '100%';
+            } else {
+                header.style.maxWidth = headerWidth + 'px';
+                footer.style.maxWidth = headerWidth + 'px';
+            }
+            
+            // Also update group bars width
+            applyGroupPosition('a');
+            applyGroupPosition('b');
+            
+            localStorage.setItem('aads-header-width', headerWidth);
+        }
+
+        // Adjust footer position
+        function adjustFooterPosition(direction) {
+            if (settingsLocked) return;
+            const step = 10;
+            if (direction === 'up') {
+                footerPosition += step;
+            } else if (direction === 'down') {
+                footerPosition -= step;
+            }
+            applyFooterPosition();
+        }
+
+        // Reset footer position
+        function resetFooterPosition() {
+            if (settingsLocked) return;
+            footerPosition = 0;
+            applyFooterPosition();
+        }
+
+        // Apply footer position
+        function applyFooterPosition() {
+            const footer = document.querySelector('.branded-footer');
+            footer.style.marginBottom = footerPosition + 'px';
+            localStorage.setItem('aads-footer-position', footerPosition);
+        }
+
+        // Set color theme
+        function setColorTheme(theme) {
+            if (settingsLocked) return;
+            if (!colorThemes[theme]) return;
+            
+            currentTheme = theme;
+            const colors = colorThemes[theme];
+            const header = document.querySelector('.branded-header');
+            const footer = document.querySelector('.branded-footer');
+            const groupABar = document.getElementById('groupABar');
+            const groupBBar = document.getElementById('groupBBar');
+            
+            // Apply colors to header and footer
+            header.style.background = colors.gradient;
+            footer.style.background = colors.gradient;
+            header.style.borderBottomColor = colors.border;
+            footer.style.borderTopColor = colors.border;
+            
+            // Apply colors to group bars
+            groupABar.style.background = colors.gradient;
+            groupBBar.style.background = colors.gradient;
+            // Use custom bar text color if set, otherwise use theme default
+            const textColor = barTextColor || colors.text;
+            groupABar.style.color = textColor;
+            groupBBar.style.color = textColor;
+            
+            // Update text colors (use custom if set, otherwise theme default)
+            const headerTexts = header.querySelectorAll('h1, h2, div');
+            const footerTexts = footer.querySelectorAll('p');
+            headerTexts.forEach(el => el.style.color = textColor);
+            footerTexts.forEach(el => el.style.color = textColor);
+            
+            // Update active preset indicator
+            document.querySelectorAll('.color-preset').forEach(preset => {
+                preset.classList.remove('active');
+            });
+            document.querySelector(`[data-theme="${theme}"]`).classList.add('active');
+            
+            // Save preference
+            localStorage.setItem('aads-color-theme', theme);
+        }
+
+        // Set bar text color
+        function setBarTextColor(color) {
+            if (settingsLocked) {
+                alert('Settings are locked! Unlock them first to change colors.');
+                return;
+            }
+            
+            barTextColor = color;
+            const groupABar = document.getElementById('groupABar');
+            const groupBBar = document.getElementById('groupBBar');
+            const header = document.querySelector('.branded-header');
+            const footer = document.querySelector('.branded-footer');
+            
+            // Apply to group bars
+            if (groupABar && groupBBar) {
+                groupABar.style.color = color;
+                groupBBar.style.color = color;
+            }
+            
+            // Apply to header text elements
+            if (header) {
+                const headerTexts = header.querySelectorAll('h1, h2, div');
+                headerTexts.forEach(el => el.style.color = color);
+            }
+            
+            // Apply to footer text elements
+            if (footer) {
+                const footerTexts = footer.querySelectorAll('p');
+                footerTexts.forEach(el => el.style.color = color);
+            }
+            
+            localStorage.setItem('aads-bar-text-color', color);
+        }
+
+        // Adjust group overlay position
+        function adjustGroupPosition(group, direction) {
+            if (settingsLocked) return;
+            const step = 2;
+            if (direction === 'up') {
+                groupPositions[group].top -= step;
+            } else if (direction === 'down') {
+                groupPositions[group].top += step;
+            }
+            applyGroupPosition(group);
+        }
+
+        // Toggle group bar visibility
+        function toggleGroupBar(group) {
+            if (settingsLocked) return;
+            groupPositions[group].visible = !groupPositions[group].visible;
+            applyGroupPosition(group);
+            
+            const button = document.getElementById(`toggleGroup${group.toUpperCase()}`);
+            button.textContent = groupPositions[group].visible ? 'Hide' : 'Show';
+        }
+
+        // Apply group position
+        function applyGroupPosition(group) {
+            const bar = document.getElementById(`group${group.toUpperCase()}Bar`);
+            bar.style.top = groupPositions[group].top + 'px';
+            bar.style.display = groupPositions[group].visible ? 'block' : 'none';
+            
+            // Match header width
+            if (headerWidth === 0) {
+                bar.style.maxWidth = '100%';
+                bar.style.width = '100%';
+            } else {
+                bar.style.maxWidth = headerWidth + 'px';
+                bar.style.width = headerWidth + 'px';
+            }
+            
+            localStorage.setItem(`aads-group-${group}-position`, JSON.stringify(groupPositions[group]));
+        }
+
+        // Reset group positions
+        function resetGroupPositions() {
+            groupPositions.a = { top: 100, visible: false };
+            groupPositions.b = { top: 400, visible: false };
+            applyGroupPosition('a');
+            applyGroupPosition('b');
+            document.getElementById('toggleGroupA').textContent = 'Show';
+            document.getElementById('toggleGroupB').textContent = 'Show';
+        }
+
+        // Load saved settings on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            // Load saved URL
+            const savedUrl = localStorage.getItem('aads-stats-url');
+            if (savedUrl) {
+                document.getElementById('urlInput').value = savedUrl;
+                document.getElementById('statsFrame').src = savedUrl;
+            }
+
+            // Load saved frame state
+            const savedState = localStorage.getItem('aads-frame-state');
+            if (savedState) {
+                frameState = JSON.parse(savedState);
+                document.getElementById('zoomInput').value = Math.round(frameState.zoom * 100);
+                document.getElementById('widthInput').value = frameState.width;
+                document.getElementById('heightInput').value = frameState.height;
+                applyFrameTransform();
+            }
+
+            // Load saved footer text
+            const savedFooter = localStorage.getItem('aads-footer-text');
+            if (savedFooter) {
+                document.getElementById('footerTextInput').value = savedFooter;
+                document.getElementById('footerText').textContent = savedFooter;
+            }
+
+            // Load saved header width
+            const savedWidth = localStorage.getItem('aads-header-width');
+            if (savedWidth !== null) {
+                headerWidth = parseInt(savedWidth);
+                if (headerWidth === 0) {
+                    document.getElementById('headerWidthInput').value = 'Full';
+                } else {
+                    document.getElementById('headerWidthInput').value = headerWidth;
+                }
+                applyHeaderWidth();
+            } else {
+                applyHeaderWidth(); // Apply default width
+            }
+
+            // Load saved footer position
+            const savedFooterPos = localStorage.getItem('aads-footer-position');
+            if (savedFooterPos !== null) {
+                footerPosition = parseInt(savedFooterPos);
+                applyFooterPosition();
+            }
+
+            // Load saved color theme
+            const savedTheme = localStorage.getItem('aads-color-theme');
+            if (savedTheme && colorThemes[savedTheme]) {
+                setColorTheme(savedTheme);
+            }
+
+            // Load saved bar text color (must load AFTER theme to override)
+            const savedBarColor = localStorage.getItem('aads-bar-text-color');
+            if (savedBarColor) {
+                barTextColor = savedBarColor;
+                document.getElementById('customBarColor').value = savedBarColor;
+                // Apply directly to all elements without calling setBarTextColor to avoid lock check
+                const groupABar = document.getElementById('groupABar');
+                const groupBBar = document.getElementById('groupBBar');
+                const header = document.querySelector('.branded-header');
+                const footer = document.querySelector('.branded-footer');
+                
+                if (groupABar && groupBBar) {
+                    groupABar.style.color = savedBarColor;
+                    groupBBar.style.color = savedBarColor;
+                }
+                
+                if (header) {
+                    const headerTexts = header.querySelectorAll('h1, h2, div');
+                    headerTexts.forEach(el => el.style.color = savedBarColor);
+                }
+                
+                if (footer) {
+                    const footerTexts = footer.querySelectorAll('p');
+                    footerTexts.forEach(el => el.style.color = savedBarColor);
+                }
+            }
+
+            // Load saved group positions
+            const savedGroupA = localStorage.getItem('aads-group-a-position');
+            if (savedGroupA) {
+                groupPositions.a = JSON.parse(savedGroupA);
+                applyGroupPosition('a');
+                document.getElementById('toggleGroupA').textContent = groupPositions.a.visible ? 'Hide' : 'Show';
+            }
+            
+            const savedGroupB = localStorage.getItem('aads-group-b-position');
+            if (savedGroupB) {
+                groupPositions.b = JSON.parse(savedGroupB);
+                applyGroupPosition('b');
+                document.getElementById('toggleGroupB').textContent = groupPositions.b.visible ? 'Hide' : 'Show';
+            }
+
+            // Load saved lock state
+            const savedLock = localStorage.getItem('aads-settings-locked');
+            if (savedLock === 'true') {
+                settingsLocked = false; // Set to false first
+                toggleLock(); // Then toggle to apply the locked state
+            }
+
+            // Load saved header collapsed state
+            const savedCollapsed = localStorage.getItem('aads-header-collapsed');
+            if (savedCollapsed === 'true') {
+                controlHeaderCollapsed = false; // Set to false first
+                toggleControlHeader(); // Then toggle to apply
+            }
+        });
+
+        // Update on window resize
+        window.addEventListener('resize', applyFrameTransform);
+
+        // Update header title based on URL
+        document.getElementById('urlInput').addEventListener('input', (e) => {
+            const url = e.target.value.toLowerCase();
+            let title = 'Player Standings';
+            
+            if (url.includes('standings')) {
+                title = 'Player Standings';
+            } else if (url.includes('stats')) {
+                title = 'Statistics';
+            } else if (url.includes('schedule')) {
+                title = 'Schedule';
+            } else if (url.includes('groups')) {
+                title = 'Group Standings';
+            }
+            
+            document.getElementById('headerTitle').textContent = title;
+        });
+    </script>
+</body>
+</html>
